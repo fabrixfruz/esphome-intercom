@@ -165,7 +165,7 @@ to itself. Each phone accepts one active call, so a second caller gets `486
 Busy Here`. Several cards may display the same phone, but the first card to
 answer owns that call's media and late answers cannot steal it.
 
-The next release lets Home Assistant automations do something more interesting
+This release lets Home Assistant automations do something more interesting
 than switch lights on and off. A doorbell or external call can ring HA first;
 if nobody answers, the still-open call can move to Assist and your carefully
 trained assistant can act as a domestic secretary. Not mine, obviously: mine
