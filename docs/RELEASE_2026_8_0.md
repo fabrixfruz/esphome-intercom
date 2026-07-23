@@ -271,9 +271,11 @@ The `2026.7.0` SIP migration remains the breaking baseline. For `2026.8.0`:
 - custom ESP YAMLs that relied on `auto_entities` must declare the desired
   native `platform: voip_stack` entities or include the maintained package;
 - experimental automation routing is opt-in and may evolve;
-- SIP video remains HA-browser only: ESP and Assist endpoints are
-  audio-only, conference video mixing is not implemented, and standard
-  SIP-to-SIP bridges require an exact compatible codec/profile;
+- Home Assistant terminates video media in its browser softphone, but the
+  remote peer can be a standard SIP video phone, video door station, softphone
+  or a compatible endpoint reached through a PBX/trunk. ESP and Assist
+  endpoints remain audio-only, conference video mixing is not implemented,
+  and SIP-to-SIP video bridges require an exact compatible codec/profile;
 - local SIP/RTP is plaintext. Use a trusted LAN/VLAN/VPN and do not expose ESP
   listeners directly to the Internet;
 - there is no SRTP, SIP/TLS on ESP, ICE/STUN/TURN, recording or general-purpose
