@@ -301,11 +301,29 @@ a ring group or the default HA phone. A typical setup is:
 3. the first endpoint to answer owns the call and the other members stop
    ringing;
 4. an optional HA automation forwards an unanswered call or hands it to
-   Assist.
+   Assist using the
+   [copyable no-answer recipe](docs/AUTOMATION_DIALPLAN.md#forward-an-unanswered-ha-call-to-assist).
 
-A standard SIP video door station negotiates video with a compatible browser
-phone. Audio-only ESP members simply receive audio; their presence in the same
-ring group must not force the whole call to advertise video.
+A standard SIP video door station can negotiate video on a direct route to a
+compatible Home Assistant browser phone. In a ring group, every outbound SIP
+branch is negotiated independently: a compatible SIP video phone may receive
+video while audio-only ESP members receive audio, so an ESP member does not
+force every other branch to become audio-only. An HA browser phone that wins an
+inbound SIP ring group currently answers that group leg as audio-only; route
+directly to the browser phone when video there is required.
+
+**Build this setup:**
+
+1. [Create the ring group and assign its members](docs/GROUPS.md#declaring-groups).
+2. Configure the trunk's normal
+   [inbound fallback destination](docs/SIP_TRUNK.md#inbound-routing), or enable
+   the experimental automation override and
+   [route selected trunk calls to the group](docs/AUTOMATION_DIALPLAN.md#route-only-providerpbx-trunk-calls-to-a-ring-group).
+3. For a direct video route to an HA phone,
+   [enable SIP video and check the codec/browser requirements](docs/SIP_VIDEO.md).
+4. Add the
+   [unanswered-call forward to Assist](docs/AUTOMATION_DIALPLAN.md#forward-an-unanswered-ha-call-to-assist)
+   only after the normal ringing route works.
 
 ![Assist answers an unattended doorbell call and queues the delivery notification](docs/images/assist-unanswered-doorbell.png)
 
