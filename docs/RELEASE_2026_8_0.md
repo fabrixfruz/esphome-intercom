@@ -56,9 +56,10 @@ default phone, then add Kitchen, Reception, Office or any other room from
 
 ## 🎥 SIP Video Calling
 
-The HA softphone can now become an opt-in SIP video phone for standard phones,
-softphones, PBXs and video door stations. ESPHome endpoints intentionally remain
-audio-only.
+SIP video is supported in web browsers, the Home Assistant Companion app,
+standard SIP video door stations, SIP video phones and softphones, including
+compatible routes through a PBX or trunk. ESPHome endpoints intentionally
+remain audio-only.
 
 - Direct receive supports H.264, VP8 and RTP/JPEG without decoding or
   re-encoding video on the HA server.
@@ -271,11 +272,11 @@ The `2026.7.0` SIP migration remains the breaking baseline. For `2026.8.0`:
 - custom ESP YAMLs that relied on `auto_entities` must declare the desired
   native `platform: voip_stack` entities or include the maintained package;
 - experimental automation routing is opt-in and may evolve;
-- Home Assistant terminates video media in its browser softphone, but the
-  remote peer can be a standard SIP video phone, video door station, softphone
-  or a compatible endpoint reached through a PBX/trunk. ESP and Assist
-  endpoints remain audio-only, conference video mixing is not implemented,
-  and SIP-to-SIP video bridges require an exact compatible codec/profile;
+- SIP video is supported in web browsers, the Home Assistant Companion app,
+  standard SIP video door stations, SIP video phones and softphones, including
+  compatible routes through a PBX or trunk. ESP and Assist endpoints remain
+  audio-only, conference video mixing is not implemented, and SIP-to-SIP video
+  bridges require an exact compatible codec/profile;
 - local SIP/RTP is plaintext. Use a trusted LAN/VLAN/VPN and do not expose ESP
   listeners directly to the Internet;
 - there is no SRTP, SIP/TLS on ESP, ICE/STUN/TURN, recording or general-purpose
