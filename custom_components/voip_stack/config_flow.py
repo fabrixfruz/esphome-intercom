@@ -52,6 +52,8 @@ from .phone_endpoint import DEFAULT_ENDPOINT_ID, EndpointKind, OfflinePolicy
 from .sip_registrar import generate_password, normalize_username
 from .const import (
     CONF_ASSIST_ADVANCED_CALL_CONTEXT,
+    CONF_ASSIST_DYNAMIC_TTS_ENGINE,
+    CONF_ASSIST_DYNAMIC_TTS_LANGUAGES,
     CONF_ASSIST_ENDPOINT_ENABLED,
     CONF_ASSIST_EXTENSION,
     CONF_ASSIST_PIPELINE,
@@ -367,6 +369,12 @@ class VoipStackConfigFlow(ConfigFlow, domain=DOMAIN):
         advanced_call_context = bool(
             existing.get(CONF_ASSIST_ADVANCED_CALL_CONTEXT, False)
         )
+        dynamic_tts_engine = str(
+            existing.get(CONF_ASSIST_DYNAMIC_TTS_ENGINE) or ""
+        ).strip()
+        dynamic_tts_languages = str(
+            existing.get(CONF_ASSIST_DYNAMIC_TTS_LANGUAGES) or ""
+        ).strip()
         extension_key = (
             vol.Required(CONF_ASSIST_EXTENSION, default=suggested)
             if suggested
@@ -389,6 +397,14 @@ class VoipStackConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_ASSIST_ADVANCED_CALL_CONTEXT,
                     default=advanced_call_context,
                 ): BooleanSelector(),
+                vol.Optional(
+                    CONF_ASSIST_DYNAMIC_TTS_ENGINE,
+                    description={"suggested_value": dynamic_tts_engine},
+                ): TextSelector(),
+                vol.Optional(
+                    CONF_ASSIST_DYNAMIC_TTS_LANGUAGES,
+                    description={"suggested_value": dynamic_tts_languages},
+                ): TextSelector(),
             }
         )
         errors: dict[str, str] = {}
@@ -417,6 +433,12 @@ class VoipStackConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._base_input[CONF_ASSIST_ADVANCED_CALL_CONTEXT] = bool(
                     user_input.get(CONF_ASSIST_ADVANCED_CALL_CONTEXT, False)
                 )
+                self._base_input[CONF_ASSIST_DYNAMIC_TTS_ENGINE] = str(
+                    user_input.get(CONF_ASSIST_DYNAMIC_TTS_ENGINE) or ""
+                ).strip()
+                self._base_input[CONF_ASSIST_DYNAMIC_TTS_LANGUAGES] = str(
+                    user_input.get(CONF_ASSIST_DYNAMIC_TTS_LANGUAGES) or ""
+                ).strip()
                 if self._base_input[CONF_TRUNK_ENABLED]:
                     return await self.async_step_trunk()
                 data = dict(self._base_input)
