@@ -142,8 +142,13 @@ class AssistMediaSession:
             lang.strip() for lang in str(dynamic_tts_languages or "").split(",") if lang.strip()
         )
         self._last_intent_response_text = ""
-
-        self.transport: asyncio.DatagramTransport | None = None
+        # True mentre e' in corso il turno di apertura
+        # (_run_call_connected_turn, sempre end_stage=TTS) o un turno
+        # regolare SENZA bypass dinamico attivo - in questi casi la
+        # pipeline emette davvero tts-end e va gestito. False durante i
+        # turni regolari con dynamic_tts_engine_id configurato
+        # (end_stage=INTENT, TTS gestito a parte da _stream_tts_dynamic).
+        self._expect_pipeline_tts = True
         self.closed = asyncio.Event()
         self.rx_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=_RX_QUEUE_FRAMES)
         self.tx_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=_TX_QUEUE_FRAMES)
@@ -487,6 +492,16 @@ class AssistMediaSession:
             return
         if event_type != "tts-end" or not event.data:
             return
+        if not self._expect_pipeline_tts:
+            # Turno regolare con bypass dinamico attivo
+            # (end_stage=PipelineStage.INTENT): la pipeline non dovrebbe
+            # mai emettere tts-end per questi turni. Se arriva comunque un
+            # evento residuo/tardivo, lo ignoriamo esplicitamente invece
+            # di rischiare una race con _stream_tts_dynamic sullo stesso
+            # self._tts_task. Il turno di apertura (_run_call_connected_turn)
+            # imposta invece _expect_pipeline_tts=True prima di avviarsi,
+            # dato che quello usa sempre end_stage=PipelineStage.TTS.
+            return
         output = event.data.get("tts_output") or {}
         token = str(output.get("token") or "")
         if not token or (self._tts_task is not None and not self._tts_task.done()):
@@ -617,6 +632,7 @@ class AssistMediaSession:
                 self._tts_task = None
                 self._pipeline_failed = False
                 self._last_intent_response_text = ""
+                self._expect_pipeline_tts = not dynamic_tts_active
                 self._drain_rx()
                 self._accepting_input = True
                 await async_pipeline_from_audio_stream(
