@@ -25,6 +25,40 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+# Lingue supportate dal fallback statico (langdetect fallisce silenziosamente
+# su testo troppo corto/ambiguo): se il rilevamento fallisce o non e'
+# compatibile con l'engine, si torna alla lingua di default della pipeline.
+_LANGDETECT_MIN_CHARS = 3
+
+
+def _detect_dynamic_tts_language(text: str, allowed_languages: tuple[str, ...]) -> str | None:
+    """Rileva la lingua del testo, ristretta all'elenco atteso.
+
+    Ritorna None se il rilevamento fallisce o produce una lingua non
+    presente in allowed_languages - in quel caso il chiamante deve
+    ricadere sulla lingua di default della pipeline, non su un errore.
+    """
+    clean = " ".join(str(text or "").split())
+    if len(clean) < _LANGDETECT_MIN_CHARS:
+        return None
+    try:
+        from langdetect import DetectorFactory, detect
+
+        DetectorFactory.seed = 0  # risultati deterministici
+        detected = detect(clean)
+    except Exception:  # langdetect non installato, o rilevamento fallito
+        _LOGGER.debug("Rilevamento lingua fallito per il testo: %s", clean[:80])
+        return None
+    if allowed_languages and detected not in allowed_languages:
+        _LOGGER.debug(
+            "Lingua rilevata '%s' fuori dall'elenco atteso %s, uso il default pipeline",
+            detected,
+            allowed_languages,
+        )
+        return None
+    return detected
+
+
 ASSIST_PCM_FORMAT = AudioFormat(16000, "s16le", 1, 20)
 _RX_QUEUE_FRAMES = 50
 _TX_QUEUE_FRAMES = 50
@@ -85,6 +119,8 @@ class AssistMediaSession:
         pipeline_id: str,
         call_connected_intent: str,
         on_complete: Callable[[str], Awaitable[None]],
+        dynamic_tts_engine_id: str = "",
+        dynamic_tts_languages: str = "",
     ) -> None:
         self.hass = hass
         self.invite = invite
@@ -93,6 +129,19 @@ class AssistMediaSession:
         self.pipeline_id = str(pipeline_id or "").strip()
         self.call_connected_intent = str(call_connected_intent or "").strip()
         self.on_complete = on_complete
+        # Se configurato, questo motore TTS (es. un'entita' Google Translate
+        # gia' validata come multilingua) viene chiamato DIRETTAMENTE per i
+        # turni di conversazione regolari, bypassando pipeline.tts_language
+        # (fisso per pipeline in Home Assistant core - vedi
+        # homeassistant/components/assist_pipeline/pipeline.py). Il turno di
+        # apertura (_run_call_connected_turn) resta invece sulla lingua di
+        # default della pipeline, dato che a quel punto l'ospite non ha
+        # ancora parlato e non c'e' nulla da rilevare.
+        self.dynamic_tts_engine_id = str(dynamic_tts_engine_id or "").strip()
+        self.dynamic_tts_languages: tuple[str, ...] = tuple(
+            lang.strip() for lang in str(dynamic_tts_languages or "").split(",") if lang.strip()
+        )
+        self._last_intent_response_text = ""
 
         self.transport: asyncio.DatagramTransport | None = None
         self.closed = asyncio.Event()
@@ -419,21 +468,59 @@ class AssistMediaSession:
                 event.data,
             )
             return
+        if event_type == "intent-end" and event.data:
+            # Catturiamo qui il testo generato dall'agente conversazionale
+            # PRIMA che la pipeline lo passi al proprio step TTS (a lingua
+            # fissa) - ci serve per rilevare la lingua e sintetizzare noi
+            # stessi l'audio con l'engine/lingua corretti.
+            try:
+                speech = (
+                    event.data.get("intent_output", {})
+                    .get("response", {})
+                    .get("speech", {})
+                    .get("plain", {})
+                    .get("speech", "")
+                )
+            except AttributeError:
+                speech = ""
+            self._last_intent_response_text = str(speech or "")
+            return
         if event_type != "tts-end" or not event.data:
             return
         output = event.data.get("tts_output") or {}
         token = str(output.get("token") or "")
         if not token or (self._tts_task is not None and not self._tts_task.done()):
             return
-        self._tts_task = self.hass.async_create_task(self._stream_tts(token))
+        self._tts_task = self.hass.async_create_task(self._stream_tts_from_token(token))
 
-    async def _stream_tts(self, token: str) -> None:
-        """Stream provider-agnostic HA TTS PCM chunks into the RTP queue."""
+    async def _stream_tts_from_token(self, token: str) -> None:
+        """Consuma l'audio TTS gia' generato dalla pipeline (lingua fissa)."""
         from homeassistant.components import tts
 
         stream = tts.async_get_stream(self.hass, token)
         if stream is None:
             raise RuntimeError("Assist TTS stream is unavailable")
+        await self._stream_tts_result(stream)
+
+    async def _stream_tts_dynamic(self, message: str, language: str) -> None:
+        """Sintetizza e trasmette l'audio con motore/lingua espliciti,
+        bypassando pipeline.tts_language. Usato per i turni regolari quando
+        dynamic_tts_engine_id e' configurato e il rilevamento lingua va a
+        buon fine."""
+        from homeassistant.components import tts
+
+        stream = tts.async_create_stream(
+            self.hass,
+            engine=self.dynamic_tts_engine_id,
+            language=language,
+            options=self._tts_audio_output(),
+        )
+        stream.async_set_message(message)
+        await self._stream_tts_result(stream)
+
+    async def _stream_tts_result(self, stream: Any) -> None:
+        """Converte in PCM e mette in coda l'audio di un ResultStream HA,
+        indipendentemente da come e' stato creato (pipeline o manuale)."""
         pending = bytearray()
         frame_bytes = ASSIST_PCM_FORMAT.nominal_frame_bytes
         async for chunk in stream.async_stream_result():
@@ -513,18 +600,23 @@ class AssistMediaSession:
         from homeassistant.components.assist_pipeline import (
             async_pipeline_from_audio_stream,
         )
-        from homeassistant.components.assist_pipeline.pipeline import AudioSettings
+        from homeassistant.components.assist_pipeline.pipeline import (
+            AudioSettings,
+            PipelineStage,
+        )
         from homeassistant.helpers import chat_session
 
         with chat_session.async_get_chat_session(self.hass) as session:
             conversation_id = session.conversation_id
         reason = "pipeline_complete"
+        dynamic_tts_active = bool(self.dynamic_tts_engine_id)
         try:
             await self._run_call_connected_turn(conversation_id)
             while not self.closed.is_set():
                 self.counters["pipeline_runs"] += 1
                 self._tts_task = None
                 self._pipeline_failed = False
+                self._last_intent_response_text = ""
                 self._drain_rx()
                 self._accepting_input = True
                 await async_pipeline_from_audio_stream(
@@ -549,8 +641,33 @@ class AssistMediaSession:
                         noise_suppression_level=_CALL_NOISE_SUPPRESSION_LEVEL,
                         silence_seconds=_CALL_END_SILENCE_SECONDS,
                     ),
+                    # Se un motore TTS dinamico e' configurato, la pipeline si
+                    # ferma dopo l'agente conversazionale (INTENT): il TTS a
+                    # lingua fissa del core HA non viene mai invocato per
+                    # questo turno. Sintetizziamo noi stessi subito dopo,
+                    # con la lingua rilevata sul testo appena catturato in
+                    # _pipeline_event (evento intent-end).
+                    end_stage=PipelineStage.INTENT
+                    if dynamic_tts_active
+                    else PipelineStage.TTS,
                 )
                 self._accepting_input = False
+                if dynamic_tts_active and not self._pipeline_failed:
+                    language = _detect_dynamic_tts_language(
+                        self._last_intent_response_text, self.dynamic_tts_languages
+                    )
+                    if self._last_intent_response_text:
+                        fallback_language = (
+                            self.dynamic_tts_languages[0]
+                            if self.dynamic_tts_languages
+                            else "it"
+                        )
+                        self._tts_task = self.hass.async_create_task(
+                            self._stream_tts_dynamic(
+                                self._last_intent_response_text,
+                                language or fallback_language,
+                            )
+                        )
                 if self._pipeline_failed:
                     raise RuntimeError("Assist pipeline reported an error")
                 await self._finish_tts_turn()
