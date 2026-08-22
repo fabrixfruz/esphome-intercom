@@ -149,6 +149,7 @@ class AssistMediaSession:
         # turni regolari con dynamic_tts_engine_id configurato
         # (end_stage=INTENT, TTS gestito a parte da _stream_tts_dynamic).
         self._expect_pipeline_tts = True
+        self.transport: asyncio.DatagramTransport | None = None
         self.closed = asyncio.Event()
         self.rx_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=_RX_QUEUE_FRAMES)
         self.tx_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=_TX_QUEUE_FRAMES)
