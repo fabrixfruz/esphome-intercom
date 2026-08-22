@@ -10,6 +10,16 @@ CONF_ASSIST_ENDPOINT_ENABLED = "assist_endpoint_enabled"
 CONF_ASSIST_EXTENSION = "assist_extension"
 CONF_ASSIST_PIPELINE = "assist_pipeline"
 CONF_ASSIST_ADVANCED_CALL_CONTEXT = "assist_advanced_call_context"
+# Multilingua per-turno: il motore TTS scelto qui viene chiamato DIRETTAMENTE
+# (bypassando pipeline.tts_language, fisso per pipeline in HA core) con la
+# lingua rilevata di volta in volta sul testo generato dall'agente
+# conversazionale. Se vuoto, il comportamento resta quello originale
+# (lingua fissa della pipeline).
+CONF_ASSIST_DYNAMIC_TTS_ENGINE = "assist_dynamic_tts_engine"
+# Elenco whitelist di codici lingua attesi (es. "it,en,de,fr"), separati da
+# virgola. Restringere il rilevamento a questo insieme riduce i falsi
+# positivi tipici del language-detection su frasi brevi.
+CONF_ASSIST_DYNAMIC_TTS_LANGUAGES = "assist_dynamic_tts_languages"
 CONF_DEBUG_MODE = "debug_mode"
 # Keep the persisted key stable for configured entries created before the SIP
 # video profile graduated from preview status.
