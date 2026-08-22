@@ -30,6 +30,8 @@ from .config_entry_runtime import (
 from .const import (
     CONF_AUTOMATION_ROUTING_ENABLED,
     CONF_ASSIST_ADVANCED_CALL_CONTEXT,
+    CONF_ASSIST_DYNAMIC_TTS_ENGINE,
+    CONF_ASSIST_DYNAMIC_TTS_LANGUAGES,
     CONF_ASSIST_PIPELINE,
     CONF_SIP_VIDEO,
     CONF_REGISTRAR_ENABLED,
@@ -544,6 +546,12 @@ async def async_start_sip_endpoint(hass: HomeAssistant) -> bool:
             local_rtp_port=local_rtp_port,
             reservation=reservation,
             pipeline_id=str(assist_cfg.get(CONF_ASSIST_PIPELINE) or "preferred"),
+            dynamic_tts_engine_id=str(
+                assist_cfg.get(CONF_ASSIST_DYNAMIC_TTS_ENGINE) or ""
+            ).strip(),
+            dynamic_tts_languages=str(
+                assist_cfg.get(CONF_ASSIST_DYNAMIC_TTS_LANGUAGES) or ""
+            ).strip(),
             call_connected_intent=build_call_connected_intent(
                 caller=caller_name,
                 caller_id=caller_id,
