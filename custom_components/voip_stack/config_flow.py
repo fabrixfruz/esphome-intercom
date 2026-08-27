@@ -54,6 +54,11 @@ from .const import (
     CONF_ASSIST_ADVANCED_CALL_CONTEXT,
     CONF_ASSIST_DYNAMIC_TTS_ENGINE,
     CONF_ASSIST_DYNAMIC_TTS_LANGUAGES,
+    CONF_ASSIST_VOIP_STATE_ENTITY,
+    CONF_ASSIST_VOIP_REASON_ENTITY,
+    CONF_ASSIST_DYNAMIC_TTS_VOICE,
+    CONF_ASSIST_FIXED_GREETING,
+    CONF_ASSIST_DYNAMIC_TTS_VOICES,
     CONF_ASSIST_ENDPOINT_ENABLED,
     CONF_ASSIST_EXTENSION,
     CONF_ASSIST_PIPELINE,
@@ -375,6 +380,21 @@ class VoipStackConfigFlow(ConfigFlow, domain=DOMAIN):
         dynamic_tts_languages = str(
             existing.get(CONF_ASSIST_DYNAMIC_TTS_LANGUAGES) or ""
         ).strip()
+        voip_state_entity = str(
+            existing.get(CONF_ASSIST_VOIP_STATE_ENTITY) or ""
+        ).strip()
+        voip_reason_entity = str(
+            existing.get(CONF_ASSIST_VOIP_REASON_ENTITY) or ""
+        ).strip()
+        dynamic_tts_voice = str(
+            existing.get(CONF_ASSIST_DYNAMIC_TTS_VOICE) or ""
+        ).strip()
+        fixed_greeting = str(
+            existing.get(CONF_ASSIST_FIXED_GREETING) or ""
+        ).strip()
+        dynamic_tts_voices = str(
+            existing.get(CONF_ASSIST_DYNAMIC_TTS_VOICES) or ""
+        ).strip()
         extension_key = (
             vol.Required(CONF_ASSIST_EXTENSION, default=suggested)
             if suggested
@@ -404,6 +424,26 @@ class VoipStackConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_ASSIST_DYNAMIC_TTS_LANGUAGES,
                     description={"suggested_value": dynamic_tts_languages},
+                ): TextSelector(),
+                vol.Optional(
+                    CONF_ASSIST_VOIP_STATE_ENTITY,
+                    description={"suggested_value": voip_state_entity},
+                ): TextSelector(),
+                vol.Optional(
+                    CONF_ASSIST_VOIP_REASON_ENTITY,
+                    description={"suggested_value": voip_reason_entity},
+                ): TextSelector(),
+                vol.Optional(
+                    CONF_ASSIST_DYNAMIC_TTS_VOICE,
+                    description={"suggested_value": dynamic_tts_voice},
+                ): TextSelector(),
+                vol.Optional(
+                    CONF_ASSIST_FIXED_GREETING,
+                    description={"suggested_value": fixed_greeting},
+                ): TextSelector(),
+                vol.Optional(
+                    CONF_ASSIST_DYNAMIC_TTS_VOICES,
+                    description={"suggested_value": dynamic_tts_voices},
                 ): TextSelector(),
             }
         )
@@ -438,6 +478,21 @@ class VoipStackConfigFlow(ConfigFlow, domain=DOMAIN):
                 ).strip()
                 self._base_input[CONF_ASSIST_DYNAMIC_TTS_LANGUAGES] = str(
                     user_input.get(CONF_ASSIST_DYNAMIC_TTS_LANGUAGES) or ""
+                ).strip()
+                self._base_input[CONF_ASSIST_VOIP_STATE_ENTITY] = str(
+                    user_input.get(CONF_ASSIST_VOIP_STATE_ENTITY) or ""
+                ).strip()
+                self._base_input[CONF_ASSIST_VOIP_REASON_ENTITY] = str(
+                    user_input.get(CONF_ASSIST_VOIP_REASON_ENTITY) or ""
+                ).strip()
+                self._base_input[CONF_ASSIST_DYNAMIC_TTS_VOICE] = str(
+                    user_input.get(CONF_ASSIST_DYNAMIC_TTS_VOICE) or ""
+                ).strip()
+                self._base_input[CONF_ASSIST_FIXED_GREETING] = str(
+                    user_input.get(CONF_ASSIST_FIXED_GREETING) or ""
+                ).strip()
+                self._base_input[CONF_ASSIST_DYNAMIC_TTS_VOICES] = str(
+                    user_input.get(CONF_ASSIST_DYNAMIC_TTS_VOICES) or ""
                 ).strip()
                 if self._base_input[CONF_TRUNK_ENABLED]:
                     return await self.async_step_trunk()
