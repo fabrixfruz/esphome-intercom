@@ -32,6 +32,11 @@ from .const import (
     CONF_ASSIST_ADVANCED_CALL_CONTEXT,
     CONF_ASSIST_DYNAMIC_TTS_ENGINE,
     CONF_ASSIST_DYNAMIC_TTS_LANGUAGES,
+    CONF_ASSIST_VOIP_STATE_ENTITY,
+    CONF_ASSIST_VOIP_REASON_ENTITY,
+    CONF_ASSIST_DYNAMIC_TTS_VOICE,
+    CONF_ASSIST_FIXED_GREETING,
+    CONF_ASSIST_DYNAMIC_TTS_VOICES,
     CONF_ASSIST_PIPELINE,
     CONF_SIP_VIDEO,
     CONF_REGISTRAR_ENABLED,
@@ -551,6 +556,21 @@ async def async_start_sip_endpoint(hass: HomeAssistant) -> bool:
             ).strip(),
             dynamic_tts_languages=str(
                 assist_cfg.get(CONF_ASSIST_DYNAMIC_TTS_LANGUAGES) or ""
+            ).strip(),
+            voip_state_entity_id=str(
+                assist_cfg.get(CONF_ASSIST_VOIP_STATE_ENTITY) or ""
+            ).strip(),
+            voip_reason_entity_id=str(
+                assist_cfg.get(CONF_ASSIST_VOIP_REASON_ENTITY) or ""
+            ).strip(),
+            dynamic_tts_voice=str(
+                assist_cfg.get(CONF_ASSIST_DYNAMIC_TTS_VOICE) or ""
+            ).strip(),
+            fixed_greeting=str(
+                assist_cfg.get(CONF_ASSIST_FIXED_GREETING) or ""
+            ).strip(),
+            dynamic_tts_voices=str(
+                assist_cfg.get(CONF_ASSIST_DYNAMIC_TTS_VOICES) or ""
             ).strip(),
             call_connected_intent=build_call_connected_intent(
                 caller=caller_name,
