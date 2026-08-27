@@ -16,6 +16,7 @@ from .const import DOMAIN
 from .endpoint_device import (
     async_ensure_endpoint_device,
     endpoint_config_subentry_id,
+    endpoint_device_info,
     is_managed_endpoint,
 )
 
@@ -143,16 +144,25 @@ class EndpointEntityManager(Generic[_EntityT]):
         # Registry. Consume the latest immutable snapshot in case ensuring the
         # device had to write its Device Registry ID back into the endpoint.
         previous = event.previous
-        if (
+        stale_device_info = (
             previous is None
             or not event.endpoint.device_id
             or previous.name != event.endpoint.name
             or previous.kind != event.endpoint.kind
-        ):
+        )
+        if stale_device_info:
             async_ensure_endpoint_device(
                 self.hass, self.entry, event.endpoint, self.registry
             )
         endpoint = self.registry.get(endpoint_id) or event.endpoint
+        if stale_device_info:
+            # Il solo aggiornamento del Device Registry sopra non basta:
+            # l'entita' mantiene una propria copia in cache di device_info,
+            # che altrimenti resta quella vecchia finche' l'entita' non
+            # viene ricaricata - causando il nome stantio nella colonna
+            # Device della tabella Entita' dopo una rinomina (fix upstream
+            # n-IA-hane/esphome-intercom@4428d4d).
+            entity._attr_device_info = endpoint_device_info(endpoint)
         apply_endpoint = getattr(entity, "apply_endpoint", None)
         if callable(apply_endpoint):
             apply_endpoint(endpoint)
