@@ -7,6 +7,13 @@ from homeassistant.core import HomeAssistant
 
 from .const import (
     CONF_ASSIST_ADVANCED_CALL_CONTEXT,
+    CONF_ASSIST_DYNAMIC_TTS_ENGINE,
+    CONF_ASSIST_DYNAMIC_TTS_LANGUAGES,
+    CONF_ASSIST_VOIP_STATE_ENTITY,
+    CONF_ASSIST_VOIP_REASON_ENTITY,
+    CONF_ASSIST_DYNAMIC_TTS_VOICE,
+    CONF_ASSIST_FIXED_GREETING,
+    CONF_ASSIST_DYNAMIC_TTS_VOICES,
     CONF_ASSIST_ENDPOINT_ENABLED,
     CONF_ASSIST_EXTENSION,
     CONF_ASSIST_PIPELINE,
@@ -50,6 +57,27 @@ def entry_assist_config(entry: ConfigEntry | None = None) -> dict:
         ),
         CONF_ASSIST_EXTENSION: str(data.get(CONF_ASSIST_EXTENSION) or "").strip(),
         CONF_ASSIST_PIPELINE: str(data.get(CONF_ASSIST_PIPELINE) or "").strip(),
+        CONF_ASSIST_DYNAMIC_TTS_ENGINE: str(
+            data.get(CONF_ASSIST_DYNAMIC_TTS_ENGINE) or ""
+        ).strip(),
+        CONF_ASSIST_DYNAMIC_TTS_LANGUAGES: str(
+            data.get(CONF_ASSIST_DYNAMIC_TTS_LANGUAGES) or ""
+        ).strip(),
+        CONF_ASSIST_VOIP_STATE_ENTITY: str(
+            data.get(CONF_ASSIST_VOIP_STATE_ENTITY) or ""
+        ).strip(),
+        CONF_ASSIST_VOIP_REASON_ENTITY: str(
+            data.get(CONF_ASSIST_VOIP_REASON_ENTITY) or ""
+        ).strip(),
+        CONF_ASSIST_DYNAMIC_TTS_VOICE: str(
+            data.get(CONF_ASSIST_DYNAMIC_TTS_VOICE) or ""
+        ).strip(),
+        CONF_ASSIST_FIXED_GREETING: str(
+            data.get(CONF_ASSIST_FIXED_GREETING) or ""
+        ).strip(),
+        CONF_ASSIST_DYNAMIC_TTS_VOICES: str(
+            data.get(CONF_ASSIST_DYNAMIC_TTS_VOICES) or ""
+        ).strip(),
     }
 
 
