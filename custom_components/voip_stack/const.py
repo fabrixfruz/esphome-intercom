@@ -20,6 +20,30 @@ CONF_ASSIST_DYNAMIC_TTS_ENGINE = "assist_dynamic_tts_engine"
 # virgola. Restringere il rilevamento a questo insieme riduce i falsi
 # positivi tipici del language-detection su frasi brevi.
 CONF_ASSIST_DYNAMIC_TTS_LANGUAGES = "assist_dynamic_tts_languages"
+# Entita' da osservare per sapere se una chiamata reale originata verso un
+# residente (dopo la risoluzione di un interno via Assist) e' stata
+# risposta o e' scaduta - servono per annunciare l'esito all'ospite
+# invece di lasciarlo in attesa senza risposta.
+CONF_ASSIST_VOIP_STATE_ENTITY = "assist_voip_state_entity"
+CONF_ASSIST_VOIP_REASON_ENTITY = "assist_voip_reason_entity"
+# Voce esplicita per il motore TTS dinamico (es. "kore" per Google AI TTS/
+# Gemini) - vuoto lascia il motore usare la propria voce di default.
+# Solo alcuni motori (es. tts.google_ai_tts) supportano questa opzione;
+# viene applicata solo al bypass dinamico, mai al TTS di apertura o di
+# fallback della pipeline, che potrebbero usare un motore diverso.
+CONF_ASSIST_DYNAMIC_TTS_VOICE = "assist_dynamic_tts_voice"
+# Saluto di apertura fisso (es. "Reception Residencial Test") - se
+# compilato, sostituisce la battuta generata da Gemini per il primo
+# turno: nessuna chiamata all'LLM, nessuna variabilita' di lingua/
+# formulazione nel momento piu' delicato (primo contatto con l'ospite).
+# Se vuoto, il comportamento resta quello di sempre (saluto generato).
+CONF_ASSIST_FIXED_GREETING = "assist_fixed_greeting"
+# Mappa lingua->voce per motori dove la lingua e' incorporata nel nome
+# della voce stessa (es. Deepgram Aura: "aura-2-livia-it") invece di un
+# parametro separato come Gemini. Formato: "it:voce_it,en:voce_en,...".
+# Ha priorita' su CONF_ASSIST_DYNAMIC_TTS_VOICE (voce singola) quando
+# presente per la lingua rilevata; altrimenti si ricade su quest'ultima.
+CONF_ASSIST_DYNAMIC_TTS_VOICES = "assist_dynamic_tts_voices"
 CONF_DEBUG_MODE = "debug_mode"
 # Keep the persisted key stable for configured entries created before the SIP
 # video profile graduated from preview status.
