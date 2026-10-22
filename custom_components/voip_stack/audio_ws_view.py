@@ -764,7 +764,13 @@ async def _run_audio_session(
     media_state_lock = asyncio.Lock()
     # Browser frames can arrive in short scheduler-driven bursts. Keep a
     # shallow FIFO jitter buffer and consume exactly one frame per RTP tick.
-    tx_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=4)
+    # Buffer di assorbimento: ~190 ms (12 frame da 16 ms). La riproduzione
+    # parte solo quando ci sono almeno 3 frame in coda e, dopo un vuoto,
+    # riparte allo stesso modo: cosi' una raffica di pacchetti dalla rete
+    # non viene scartata e un ritardo breve non crea schiocchi ripetuti.
+    tx_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=12)
+    tx_jitter_prime_frames = 3
+    tx_jitter_state = {"primed": False}
     debug_capture = (
         _DebugAudioCapture(session.call_id, rx_format=session.recv_format, tx_format=session.send_format)
         if bool(hass.data.get(DOMAIN, {}).get(CONF_DEBUG_MODE, False))
@@ -1055,9 +1061,19 @@ async def _run_audio_session(
                 frame_delay = tx_frame_delay
                 silence_pcm = tx_silence_pcm
                 next_send = loop.time()
-            try:
-                pcm = tx_queue.get_nowait()
-            except asyncio.QueueEmpty:
+            if (
+                not tx_jitter_state["primed"]
+                and tx_queue.qsize() >= tx_jitter_prime_frames
+            ):
+                tx_jitter_state["primed"] = True
+            if tx_jitter_state["primed"]:
+                try:
+                    pcm = tx_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    tx_jitter_state["primed"] = False
+                    pcm = silence_pcm
+                    counters["tx_silence_keepalive"] += 1
+            else:
                 pcm = silence_pcm
                 counters["tx_silence_keepalive"] += 1
             if (
