@@ -131,6 +131,10 @@ _PENDING_CALL_OUTCOME_ANNOUNCEMENTS: dict[str, str] = {}
 # un turno tipicamente corto/generico ("Thank you.", conferme...) dove
 # langdetect e' inaffidabile.
 _PENDING_CALL_OUTCOME_LANGUAGE: dict[str, str] = {}
+# (destinazione, motivo) dell'esito in sospeso: serve per annunciare l'esito
+# con un messaggio fisso (senza LLM) se l'agente e' indisponibile durante il
+# richiamo di Reception.
+_PENDING_CALL_OUTCOME_FIXED: dict[str, tuple[str, str]] = {}
 _CALL_OUTCOME_WAIT_TIMEOUT_SECONDS = 100.0  # poco sopra ringing_timeout tipico
 # Rete di sicurezza: se la comprensione continua a fallire (trascrizione
 # incomprensibile, l'agente continua a richiedere di ripetere), non
@@ -148,6 +152,71 @@ _CORRECTION_BY_LANGUAGE = {
     "es": "Lo siento, el apartamento {extension} no existe en nuestro directorio. ¿Podria indicarme un numero valido?",
     "fr": "Je suis desole, l'appartement {extension} n'existe pas dans notre annuaire. Pourriez-vous indiquer un numero valide?",
 }
+# Messaggio fisso (nessun LLM) riprodotto all'ospite quando l'agente
+# conversazionale non risponde (es. Gemini 503/quota esaurita) anche dopo
+# un secondo tentativo. Mai leggere all'ospite il testo dell'errore.
+# Se la lingua non e' nota con sicurezza si usa lo spagnolo.
+_AGENT_UNAVAILABLE_BY_LANGUAGE = {
+    "es": "Lo siento, el servicio no esta disponible en este momento. Por favor, intentelo de nuevo en unos instantes.",
+    "it": "Mi dispiace, il servizio non e' disponibile al momento. La preghiamo di riprovare tra qualche istante.",
+    "en": "I'm sorry, the service is not available at the moment. Please try again in a few moments.",
+    "fr": "Je suis desole, le service n'est pas disponible pour le moment. Veuillez reessayer dans quelques instants.",
+}
+_AGENT_UNAVAILABLE_DEFAULT_LANGUAGE = "es"
+# Esito fisso del richiamo quando l'agente non risponde (nessun LLM).
+_OUTCOME_NO_ANSWER_BY_LANGUAGE = {
+    "es": "El apartamento {extension} no ha respondido. Por favor, intentelo de nuevo mas tarde.",
+    "it": "L'appartamento {extension} non ha risposto. La preghiamo di riprovare piu' tardi.",
+    "en": "Apartment {extension} did not answer. Please try again later.",
+    "fr": "L'appartement {extension} n'a pas repondu. Veuillez reessayer plus tard.",
+}
+_OUTCOME_DECLINED_BY_LANGUAGE = {
+    "es": "El apartamento {extension} no puede atenderle en este momento. Por favor, intentelo de nuevo mas tarde.",
+    "it": "L'appartamento {extension} non puo' risponderle in questo momento. La preghiamo di riprovare piu' tardi.",
+    "en": "Apartment {extension} is unable to answer right now. Please try again later.",
+    "fr": "L'appartement {extension} ne peut pas vous repondre pour le moment. Veuillez reessayer plus tard.",
+}
+# Annuncio fisso quando l'ospite ha detto un interno valido ma l'agente
+# non risponde: la chiamata parte comunque (il numero lo verifichiamo noi
+# contro la rubrica, senza LLM).
+_CALLING_BY_LANGUAGE = {
+    "es": "Llamando al apartamento {extension}. Por favor, espere.",
+    "it": "Sto chiamando l'appartamento {extension}. Resti in attesa.",
+    "en": "Calling apartment {extension}. Please wait.",
+    "fr": "J'appelle l'appartement {extension}. Veuillez patienter.",
+}
+# Parole che rivelano la lingua anche in frasi troppo brevi per langdetect.
+_LANGUAGE_KEYWORDS = (
+    ("apartment", "en"),
+    ("appartamento", "it"),
+    ("apartamento", "es"),
+    ("appartement", "fr"),
+)
+
+
+def _guess_language_from_keywords(text: str) -> str | None:
+    lowered = str(text or "").lower()
+    for word, language in _LANGUAGE_KEYWORDS:
+        if word in lowered:
+            return language
+    return None
+# Pausa prima di ripetere la richiesta all'agente dopo un errore
+# (i 503 "high demand" di solito durano pochi secondi).
+_AGENT_RETRY_DELAY_SECONDS = 1.5
+# Il secondo tentativo non deve mai bloccare l'ospite a lungo: osservato in
+# pratica un retry rimasto in attesa 143 s con Gemini in 503. Oltre questo
+# limite si considera l'agente non disponibile e si procede in modo
+# deterministico (chiamata all'interno detto / messaggio fisso).
+_AGENT_RETRY_TIMEOUT_SECONDS = 15.0
+# Percorso veloce: se la frase dell'ospite contiene un interno valido
+# (verificato contro la rubrica, senza LLM) la chiamata parte subito con un
+# annuncio fisso nella lingua dell'ospite, senza attendere l'agente
+# conversazionale (che con il livello gratuito puo' impiegare 20+ s o dare
+# 503). Mettere False per tornare al flusso sempre mediato dall'agente
+# (che chiede conferma del numero).
+_FAST_EXTENSION_PATH = True
+# Tempo massimo per il primo tentativo dell'agente nel percorso a due fasi.
+_AGENT_FIRST_TIMEOUT_SECONDS = 30.0
 # Tempo massimo di attesa che l'ospite INIZI a parlare, prima di
 # considerare la chiamata abbandonata. Riguarda SOLO questa fase di
 # attesa (vedi _audio_stream): una volta rilevato il parlato, nessun
@@ -270,6 +339,7 @@ async def _announce_call_outcome(
         "aveva usato prima se riesci a dedurla, poi chiedi se desidera "
         "provare con un altro appartamento o terminare la chiamata."
     )
+    _PENDING_CALL_OUTCOME_FIXED[caller_name] = (destination, reason)
     if carried_language:
         _PENDING_CALL_OUTCOME_LANGUAGE[caller_name] = carried_language
     # Stessa pausa di sicurezza usata in _finish_and_maybe_call: l'esito
@@ -481,6 +551,9 @@ class AssistMediaSession:
         self._last_intent_response_text = ""
         self._last_continue_conversation = True
         self._last_stt_text = ""
+        # True se l'agente conversazionale ha risposto con un errore
+        # (es. Gemini non disponibile) nel turno corrente.
+        self._agent_error = False
         self._resolved_call_target: str | None = None
         # True se _audio_stream ha chiuso il turno per silenzio (l'ospite
         # non ha mai iniziato a parlare entro il tempo massimo) invece
@@ -498,6 +571,8 @@ class AssistMediaSession:
         # confidenza sufficiente, invece di rischiare una lingua sbagliata
         # su testo troppo corto per essere classificato in modo affidabile.
         self._last_confident_language: str | None = None
+        self._pending_outcome = _PENDING_CALL_OUTCOME_FIXED.pop(invite.caller, None)
+        self._close_after_outcome = False
         pending_language = _PENDING_CALL_OUTCOME_LANGUAGE.pop(invite.caller, "")
         if pending_language:
             self._last_confident_language = pending_language
@@ -889,6 +964,7 @@ class AssistMediaSession:
                 response_type = ""
                 continue_conversation = False
             if response_type == "error":
+                self._agent_error = True
                 # L'agente di conversazione (es. Google Gemini) ha catturato
                 # internamente un proprio errore (es. blocco Safety) e lo ha
                 # restituito come una risposta "normale" con il messaggio
@@ -1106,6 +1182,24 @@ class AssistMediaSession:
                 session=session,
                 intent_input=self.call_connected_intent,
             ).execute(validate=True)
+        if self._agent_error and self._pending_outcome:
+            # Agente non disponibile durante il richiamo: annuncio fisso
+            # dell'esito (lingua ereditata, altrimenti spagnolo) e chiusura.
+            destination, outcome_reason = self._pending_outcome
+            language = self._last_confident_language
+            if language not in _OUTCOME_NO_ANSWER_BY_LANGUAGE:
+                language = _AGENT_UNAVAILABLE_DEFAULT_LANGUAGE
+            table = (
+                _OUTCOME_DECLINED_BY_LANGUAGE
+                if outcome_reason in {"declined", "cancelled", "busy"}
+                else _OUTCOME_NO_ANSWER_BY_LANGUAGE
+            )
+            self._expect_pipeline_tts = False
+            await self._speak_fixed(
+                table[language].format(extension=destination), language
+            )
+            self._close_after_outcome = True
+            return
         if self._pipeline_failed:
             raise RuntimeError("Assist call-connected pipeline reported an error")
         if dynamic_tts_active and self._last_intent_response_text:
@@ -1139,6 +1233,160 @@ class AssistMediaSession:
             with contextlib.suppress(asyncio.QueueEmpty):
                 self.rx_queue.get_nowait()
 
+    async def _run_intent_retry(self, conversation_id: str, text: str) -> None:
+        """Ripete solo il passo dell'agente con l'ultimo testo dell'ospite."""
+        from homeassistant.components.assist_pipeline.pipeline import (
+            AudioSettings,
+            PipelineInput,
+            PipelineRun,
+            PipelineStage,
+            async_get_pipeline,
+        )
+        from homeassistant.helpers import chat_session
+
+        dynamic_tts_active = bool(self.dynamic_tts_engine_id)
+        self._pipeline_failed = False
+        self._agent_error = False
+        self._last_intent_response_text = ""
+        self._last_continue_conversation = True
+        self._expect_pipeline_tts = not dynamic_tts_active
+        pipeline_id = (
+            None if self.pipeline_id in {"", "preferred"} else self.pipeline_id
+        )
+        with chat_session.async_get_chat_session(self.hass, conversation_id) as session:
+            await PipelineInput(
+                run=PipelineRun(
+                    self.hass,
+                    context=Context(),
+                    pipeline=async_get_pipeline(self.hass, pipeline_id=pipeline_id),
+                    start_stage=PipelineStage.INTENT,
+                    end_stage=PipelineStage.INTENT
+                    if dynamic_tts_active
+                    else PipelineStage.TTS,
+                    event_callback=self._pipeline_event,
+                    tts_audio_output=self._tts_audio_output(),
+                    audio_settings=AudioSettings(is_vad_enabled=False),
+                ),
+                session=session,
+                intent_input=text,
+            ).execute(validate=True)
+
+    async def _agent_fallback_language(self) -> str:
+        language = self._last_confident_language
+        if not language:
+            language = _guess_language_from_keywords(self._last_stt_text)
+        if not language and self._last_stt_text:
+            language = await self.hass.async_add_executor_job(
+                _detect_dynamic_tts_language,
+                self._last_stt_text,
+                self.dynamic_tts_languages,
+            )
+        if language not in _AGENT_UNAVAILABLE_BY_LANGUAGE:
+            language = _AGENT_UNAVAILABLE_DEFAULT_LANGUAGE
+        return language
+
+    async def _speak_fixed(self, message: str, language: str) -> None:
+        if not self.dynamic_tts_engine_id:
+            return
+        try:
+            await self._stream_tts_dynamic(message, language)
+            await self.tx_queue.join()
+        except Exception:
+            _LOGGER.debug("Assist: messaggio fisso non riprodotto", exc_info=True)
+
+    async def _recover_from_agent_error(self, conversation_id: str) -> str:
+        """Gestisce un errore dell'agente conversazionale.
+
+        Ritorna:
+        - "recovered": il secondo tentativo ha prodotto una risposta valida;
+        - "call": l'agente resta non disponibile ma l'ospite ha detto un
+          interno valido: la chiamata va inoltrata (annuncio fisso);
+        - "retry_input": l'interno detto non esiste, si chiede (a voce
+          fissa) un numero valido e si resta in ascolto;
+        - "failed": nessuna strada possibile, messaggio fisso e chiusura.
+        """
+        text = self._last_stt_text
+        if text:
+            _LOGGER.warning(
+                "Assist: agente non disponibile, nuovo tentativo tra %.1fs call_id=%s",
+                _AGENT_RETRY_DELAY_SECONDS,
+                self.invite.call_id,
+            )
+            await asyncio.sleep(_AGENT_RETRY_DELAY_SECONDS)
+            try:
+                await asyncio.wait_for(
+                    self._run_intent_retry(conversation_id, text),
+                    timeout=_AGENT_RETRY_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                _LOGGER.warning(
+                    "Assist: secondo tentativo senza risposta entro %.0fs call_id=%s",
+                    _AGENT_RETRY_TIMEOUT_SECONDS,
+                    self.invite.call_id,
+                )
+                self._agent_error = True
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                _LOGGER.debug("Assist: secondo tentativo fallito", exc_info=True)
+                self._agent_error = True
+            if (
+                not self._agent_error
+                and not self._pipeline_failed
+                and self._last_intent_response_text
+            ):
+                _LOGGER.info(
+                    "Assist: agente tornato disponibile al secondo tentativo call_id=%s",
+                    self.invite.call_id,
+                )
+                return "recovered"
+        _LOGGER.error(
+            "Assist: agente conversazionale non disponibile call_id=%s",
+            self.invite.call_id,
+        )
+        self._notify_agent_unavailable()
+        # L'interno lo verifichiamo noi contro la rubrica, senza LLM: se
+        # l'ospite ne ha detto uno valido la chiamata parte comunque.
+        resolved, attempted = await _resolve_valid_extension(self.hass, text)
+        language = await self._agent_fallback_language()
+        if resolved:
+            self._resolved_call_target = resolved
+            await self._speak_fixed(
+                _CALLING_BY_LANGUAGE.get(language, _CALLING_BY_LANGUAGE["es"]).format(
+                    extension=resolved
+                ),
+                language,
+            )
+            return "call"
+        if attempted:
+            await self._speak_fixed(
+                _CORRECTION_BY_LANGUAGE.get(
+                    language, _CORRECTION_BY_LANGUAGE["en"]
+                ).format(extension=attempted),
+                language,
+            )
+            self._last_continue_conversation = True
+            return "retry_input"
+        await self._speak_fixed(_AGENT_UNAVAILABLE_BY_LANGUAGE[language], language)
+        return "failed"
+
+    def _notify_agent_unavailable(self) -> None:
+        try:
+            from homeassistant.components import persistent_notification
+
+            persistent_notification.async_create(
+                self.hass,
+                "L'agente di conversazione (es. Gemini) non ha risposto durante "
+                "una chiamata a Reception, anche dopo un secondo tentativo. "
+                "All'ospite e' stato riprodotto un messaggio di cortesia e la "
+                "chiamata e' stata chiusa. Controlla lo stato o la quota del "
+                "servizio; i dettagli sono nel log.",
+                title="VoIP Stack: agente conversazionale non disponibile",
+                notification_id="voip_stack_agent_unavailable",
+            )
+        except Exception:
+            _LOGGER.debug("Assist: notifica di indisponibilita' non creata", exc_info=True)
+
     async def _pipeline_loop(self) -> None:
         from homeassistant.components import stt
         from homeassistant.components.assist_pipeline import (
@@ -1156,7 +1404,9 @@ class AssistMediaSession:
         dynamic_tts_active = bool(self.dynamic_tts_engine_id)
         try:
             await self._run_call_connected_turn(conversation_id)
-            while not self.closed.is_set():
+            if self._close_after_outcome:
+                reason = "call_outcome_fixed"
+            while not self.closed.is_set() and not self._close_after_outcome:
                 if self.counters["pipeline_runs"] >= _MAX_PIPELINE_TURNS:
                     _LOGGER.warning(
                         "Assist: raggiunto il limite di %d turni per call_id=%s, chiudo la chiamata",
@@ -1168,10 +1418,13 @@ class AssistMediaSession:
                 self.counters["pipeline_runs"] += 1
                 self._tts_task = None
                 self._pipeline_failed = False
+                self._agent_error = False
                 self._silence_abandoned = False
                 self._last_intent_response_text = ""
+                self._last_stt_text = ""
                 self._last_continue_conversation = True
                 self._expect_pipeline_tts = not dynamic_tts_active
+                stt_only = dynamic_tts_active and _FAST_EXTENSION_PATH
                 self._drain_rx()
                 self._accepting_input = True
                 await async_pipeline_from_audio_stream(
@@ -1202,7 +1455,9 @@ class AssistMediaSession:
                     # questo turno. Sintetizziamo noi stessi subito dopo,
                     # con la lingua rilevata sul testo appena catturato in
                     # _pipeline_event (evento intent-end).
-                    end_stage=PipelineStage.INTENT
+                    end_stage=PipelineStage.STT
+                    if stt_only
+                    else PipelineStage.INTENT
                     if dynamic_tts_active
                     else PipelineStage.TTS,
                 )
@@ -1258,6 +1513,55 @@ class AssistMediaSession:
                             )
                     reason = "silence_timeout"
                     break
+                if stt_only and not self._pipeline_failed:
+                    stt_text = self._last_stt_text
+                    if stt_text:
+                        resolved, _attempted = await _resolve_valid_extension(
+                            self.hass, stt_text
+                        )
+                        if resolved:
+                            # Percorso veloce: interno valido gia' nella
+                            # frase, nessun bisogno dell'agente.
+                            language = await self._agent_fallback_language()
+                            _LOGGER.info(
+                                "Assist: percorso veloce, interno %s valido, chiamata senza agente call_id=%s",
+                                resolved,
+                                self.invite.call_id,
+                            )
+                            self._resolved_call_target = resolved
+                            await self._speak_fixed(
+                                _CALLING_BY_LANGUAGE.get(
+                                    language, _CALLING_BY_LANGUAGE["es"]
+                                ).format(extension=resolved),
+                                language,
+                            )
+                            reason = "conversation_complete"
+                            break
+                        try:
+                            await asyncio.wait_for(
+                                self._run_intent_retry(conversation_id, stt_text),
+                                timeout=_AGENT_FIRST_TIMEOUT_SECONDS,
+                            )
+                        except asyncio.TimeoutError:
+                            _LOGGER.warning(
+                                "Assist: agente senza risposta entro %.0fs call_id=%s",
+                                _AGENT_FIRST_TIMEOUT_SECONDS,
+                                self.invite.call_id,
+                            )
+                            self._agent_error = True
+                if self._agent_error and not self._pipeline_failed:
+                    # L'agente (es. Gemini) ha risposto con un errore: un
+                    # secondo tentativo, poi un messaggio fisso e chiusura
+                    # invece di un silenzio improvviso.
+                    outcome = await self._recover_from_agent_error(conversation_id)
+                    if outcome == "call":
+                        reason = "conversation_complete"
+                        break
+                    if outcome == "retry_input":
+                        continue
+                    if outcome == "failed":
+                        reason = "agent_unavailable"
+                        break
                 if dynamic_tts_active and not self._pipeline_failed:
                     language = _detect_dynamic_tts_language(
                         self._last_intent_response_text, self.dynamic_tts_languages
