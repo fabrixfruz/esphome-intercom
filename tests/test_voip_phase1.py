@@ -1609,13 +1609,14 @@ class SipClientSocketTest(unittest.IsolatedAsyncioTestCase):
             await loop.sock_sendto(remote, second_packet, ("127.0.0.1", local_port))
             await wait_until(lambda: len(ws.binary) >= 2)
             self.assertEqual(audio_ws.decode_audio_frame(ws.binary[-1]), second_pcm)
-
-            await ws.messages.put(
-                types.SimpleNamespace(
-                    type=WSMsgType.BINARY,
-                    data=audio_ws.encode_audio_frame(second_pcm),
+            # The TX jitter buffer starts playout once 3 frames are queued.
+            for _ in range(3):
+                await ws.messages.put(
+                    types.SimpleNamespace(
+                        type=WSMsgType.BINARY,
+                        data=audio_ws.encode_audio_frame(second_pcm),
+                    )
                 )
-            )
             await asyncio.sleep(0.05)
             if runtime.done():
                 self.fail(f"audio runtime ended during re-INVITE: {runtime.exception()!r}")
